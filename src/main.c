@@ -1,9 +1,65 @@
 #include "colors.h"
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/statvfs.h>
+
+static const char *fname = "/proc/mounts";
+
+struct m_entry {
+  char *device;
+  char *mount_point;
+  char *fs_type;
+  char *options;
+  int dump;
+  int pass;
+};
+
+bool startswith(const char *s, const char *search) {
+  size_t len = strlen(search);
+  if (len > strlen(s))
+    return false;
+  return strncmp(s, search, len) == 0;
+}
+
+struct m_entry *parse_line(char *line) {
+  struct m_entry *entry = (struct m_entry *)malloc(sizeof(struct m_entry));
+  if (!entry)
+    return NULL;
+  entry->device = entry->mount_point = entry->fs_type = entry->options = NULL;
+  entry->dump = entry->pass = 0;
+
+  size_t index = 0;
+  char *token = strtok(line, " ");
+  while (token != NULL && index < 6) {
+    if (index == 0)
+      entry->device = strdup(token);
+    else if (index == 1)
+      entry->mount_point = strdup(token);
+    else if (index == 2)
+      entry->fs_type = strdup(token);
+    else if (index == 3)
+      entry->options = strdup(token);
+    else if (index == 4)
+      entry->dump = atoi(token);
+    else if (index == 5)
+      entry->pass = atoi(token);
+    token = strtok(NULL, " ");
+    index++;
+  }
+  return entry;
+}
+
+void free_entry(struct m_entry *ptr) {
+  free(ptr->device);
+  free(ptr->mount_point);
+  free(ptr->fs_type);
+  free(ptr->options);
+  free(ptr);
+}
 
 int human_size(char *buffer, size_t size, int64_t bytes) {
   const char *units[] = {"Bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"};
@@ -71,18 +127,67 @@ void print_statvfs_entry(const struct statvfs *vfs) {
   printf(" |\n");
 }
 
+void print_entry(const struct m_entry *mp, const struct statvfs *fs) {
+  printf("Displaying entry");
+}
+
+int display_entry_info(const char *input) {
+  char *cp = strdup(input);
+  if (!cp) {
+    perror("Cannot copy string");
+    return -1;
+  }
+
+  struct m_entry *mp = parse_line(cp);
+  if (!mp) {
+    free(cp);
+    fprintf(stderr, "Cannot parse input line\n");
+    return -1;
+  }
+
+  struct statvfs *fs = (struct statvfs *)malloc(sizeof(struct statvfs));
+  if (!fs) {
+    free(cp);
+    free_entry(mp);
+    perror("Memory error");
+    return -1;
+  }
+
+  if (statvfs(mp->device, fs)) {
+    free(fs);
+    free(cp);
+    free_entry(mp);
+    fprintf(stderr, "statvfs failed\n");
+    return -1;
+  }
+
+  print_entry(mp, fs);
+
+  free(cp);
+  free_entry(mp);
+  free(fs);
+
+  printf("\n");
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
-  if (argc != 2) {
-    fprintf(stderr, "USAGE: %s <path>\n", argv[0]);
+  FILE *fp = fopen(fname, "r");
+  if (!fp) {
+    perror("Failed to open file");
     return EXIT_FAILURE;
   }
 
-  struct statvfs vfs;
-  if (statvfs(argv[1], &vfs)) {
-    perror("Failed to get usage info");
-    return EXIT_FAILURE;
+  printf("| Device | File system | Total | Used | Available |\n");
+  printf("|--------|-------------|-------|------|-----------|\n");
+  char buf[BUFSIZ];
+  while (fgets(buf, BUFSIZ, fp)) {
+    if (!startswith(buf, "/dev/"))
+      continue;
+    display_entry_info(buf);
   }
-  print_statvfs_entry(&vfs);
+  printf("|--------|-------------|-------|------|-----------|\n");
 
+  fclose(fp);
   return EXIT_SUCCESS;
 }
