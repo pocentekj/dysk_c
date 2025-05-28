@@ -1,4 +1,5 @@
 #include "colors.h"
+#include "str_utils.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,21 +28,9 @@ struct vfs_info {
   int used_pcrt;
 };
 
-typedef enum {
-  PARSE_OK = 0,
-  PARSE_ERR_ALLOC,
-  PARSE_ERR_FORMAT,
-  PARSE_ERR_STATVFS
-} ParseResult;
+typedef enum { PARSE_OK = 0, PARSE_ERR_ALLOC, PARSE_ERR_FORMAT, PARSE_ERR_STATVFS } ParseResult;
 
 /** HELPERS */
-
-bool startswith(const char *s, const char *search) {
-  size_t len = strlen(search);
-  if (len > strlen(s))
-    return false;
-  return strncmp(s, search, len) == 0;
-}
 
 int human_size(char *buffer, size_t size, int64_t bytes) {
   const char *units[] = {"Bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"};
@@ -80,6 +69,18 @@ void print_progress_bar(const unsigned percentage) {
   for (size_t i = 0; i < 10 - fc; i++)
     printf(" ");
   reset_colors();
+}
+
+void print_border() {
+  size_t cols[] = {32, 13, 12, 17, 13};
+  for (size_t i = 0; i < sizeof(cols) / sizeof(size_t); i++) {
+    if (i == 0)
+      putchar('|');
+    for (; cols[i] > 0; cols[i]--)
+      putchar('-');
+    putchar('|');
+  }
+  printf("\n");
 }
 
 /** UTILS */
@@ -127,30 +128,40 @@ fail:
 /** PARSERS */
 
 struct m_entry *parse_line(char *line) {
-  struct m_entry *entry = (struct m_entry *)malloc(sizeof(struct m_entry));
+  struct m_entry *entry = malloc(sizeof(struct m_entry));
   if (!entry)
     return NULL;
   entry->device = entry->mount_point = entry->fs_type = entry->options = NULL;
   entry->dump = entry->pass = 0;
 
-  size_t index = 0;
-  char *token = strtok(line, " ");
-  while (token != NULL && index < 6) {
-    if (index == 0)
-      entry->device = strdup(token);
-    else if (index == 1)
-      entry->mount_point = strdup(token);
-    else if (index == 2)
-      entry->fs_type = strdup(token);
-    else if (index == 3)
-      entry->options = strdup(token);
-    else if (index == 4)
-      entry->dump = atoi(token);
-    else if (index == 5)
-      entry->pass = atoi(token);
-    token = strtok(NULL, " ");
-    index++;
+  char *fields[6] = {0};
+  int field = 0;
+  char *start = line;
+  char *p = line;
+  while (*p && field < 5) {
+    if (*p == ' ') {
+      *p = '\0';
+      fields[field++] = start;
+      start = p + 1;
+    }
+    p++;
   }
+  fields[field++] = start; // last field
+
+  if (field != 6) {
+    free(entry);
+    return NULL;
+  }
+
+  // Decode escapes in string fields
+  for (int i = 0; i < 4; i++)
+    decode_escapes(fields[i]);
+  entry->device = strdup(fields[0]);
+  entry->mount_point = strdup(fields[1]);
+  entry->fs_type = strdup(fields[2]);
+  entry->options = strdup(fields[3]);
+  entry->dump = atoi(fields[4]);
+  entry->pass = atoi(fields[5]);
   return entry;
 }
 
@@ -177,18 +188,20 @@ struct vfs_info *parse_statvfs(const char *path) {
 /** OUTPUT */
 
 void print_entry(const struct m_entry *mp, const struct vfs_info *fs) {
-  printf("| %s ", mp->device);
-  printf("| %s | ", mp->fs_type);
+  char *abbr_device = truncate(mp->device, 30);
+  printf("| %-30s ", abbr_device);
+  printf("| %-11s | ", mp->fs_type);
   set_fg_color(YELLOW);
-  printf("%s", fs->total);
+  printf("%-11s", fs->total);
   reset_colors();
-  printf("| %d%% ", fs->used_pcrt);
+  printf("| %3d%% ", fs->used_pcrt);
   print_progress_bar(fs->used_pcrt);
   printf(" | ");
   set_fg_color(GREEN);
-  printf("%s", fs->avail);
+  printf("%-11s", fs->avail);
   reset_colors();
   printf(" |");
+  free(abbr_device);
 }
 
 ParseResult display_entry_info(const char *input) {
@@ -229,16 +242,20 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  printf("| Device | File system | Total | Used | Available |\n");
-  printf("|--------|-------------|-------|------|-----------|\n");
+  // Table header
+  print_border();
+  printf("| %-30s | File system | %-10s | %-15s | %-11s |\n", "Device", "Total", "Used", "Available");
+  print_border();
+  // Table body
   char buf[BUFSIZ];
   while (fgets(buf, BUFSIZ, fp)) {
     if (!startswith(buf, "/dev/"))
       continue;
     if (display_entry_info(buf))
-      fprintf(stderr, "parser failure\n");  // TODO: make it more verbose.
+      fprintf(stderr, "parser failure\n"); // TODO: make it more verbose.
   }
-  printf("|--------|-------------|-------|------|-----------|\n");
+  // Table footer
+  print_border();
 
   fclose(fp);
   return EXIT_SUCCESS;

@@ -10,7 +10,12 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Werror -g")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
 # Add the executable and its sources
-add_executable(dysk_c src/colors.c src/main.c)
+add_executable(
+    dysk_c 
+    src/str_utils.c
+    src/colors.c 
+    src/main.c
+)
 
 # Link additional required libraries
 target_link_libraries(dysk_c m)
