@@ -1,11 +1,13 @@
 #include "colors.h"
 #include <math.h>
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/statvfs.h>
+
+/** DATA */
 
 static const char *fname = "/proc/mounts";
 
@@ -18,47 +20,20 @@ struct m_entry {
   int pass;
 };
 
+struct vfs_info {
+  char *total;
+  char *avail;
+  char *used;
+  int used_pcrt;
+};
+
+/** HELPERS */
+
 bool startswith(const char *s, const char *search) {
   size_t len = strlen(search);
   if (len > strlen(s))
     return false;
   return strncmp(s, search, len) == 0;
-}
-
-struct m_entry *parse_line(char *line) {
-  struct m_entry *entry = (struct m_entry *)malloc(sizeof(struct m_entry));
-  if (!entry)
-    return NULL;
-  entry->device = entry->mount_point = entry->fs_type = entry->options = NULL;
-  entry->dump = entry->pass = 0;
-
-  size_t index = 0;
-  char *token = strtok(line, " ");
-  while (token != NULL && index < 6) {
-    if (index == 0)
-      entry->device = strdup(token);
-    else if (index == 1)
-      entry->mount_point = strdup(token);
-    else if (index == 2)
-      entry->fs_type = strdup(token);
-    else if (index == 3)
-      entry->options = strdup(token);
-    else if (index == 4)
-      entry->dump = atoi(token);
-    else if (index == 5)
-      entry->pass = atoi(token);
-    token = strtok(NULL, " ");
-    index++;
-  }
-  return entry;
-}
-
-void free_entry(struct m_entry *ptr) {
-  free(ptr->device);
-  free(ptr->mount_point);
-  free(ptr->fs_type);
-  free(ptr->options);
-  free(ptr);
 }
 
 int human_size(char *buffer, size_t size, int64_t bytes) {
@@ -100,35 +75,108 @@ void print_progress_bar(const unsigned percentage) {
   reset_colors();
 }
 
-void print_statvfs_entry(const struct statvfs *vfs) {
-  int64_t total = (int64_t)((int64_t)vfs->f_frsize * (int64_t)vfs->f_blocks);
-  int64_t avail = (int64_t)((int64_t)vfs->f_frsize * (int64_t)vfs->f_bavail);
+/** UTILS */
+
+void free_entry(struct m_entry *ptr) {
+  free(ptr->device);
+  free(ptr->mount_point);
+  free(ptr->fs_type);
+  free(ptr->options);
+  free(ptr);
+}
+
+void free_vfs_info(struct vfs_info *ptr) {
+  free(ptr->total);
+  free(ptr->avail);
+  free(ptr->used);
+  free(ptr);
+}
+
+struct vfs_info *vfs_info_new(int64_t total, int64_t avail, int64_t used) {
+  struct vfs_info *ptr = (struct vfs_info *)malloc(sizeof(struct vfs_info));
+  if (!ptr)
+    return NULL;
+  ptr->used_pcrt = (int)(((double)used / (double)total) * 100.0);
+  ptr->total = ptr->avail = ptr->used = NULL;
+
+  char buf[BUFSIZ];
+  if (human_size(buf, BUFSIZ, total))
+    goto fail;
+  ptr->total = strdup(buf);
+  if (human_size(buf, BUFSIZ, avail))
+    goto fail;
+  ptr->avail = strdup(buf);
+  if (human_size(buf, BUFSIZ, used))
+    goto fail;
+  ptr->used = strdup(buf);
+
+  return ptr;
+
+fail:
+  free_vfs_info(ptr);
+  return NULL;
+}
+
+/** PARSERS */
+
+struct m_entry *parse_line(char *line) {
+  struct m_entry *entry = (struct m_entry *)malloc(sizeof(struct m_entry));
+  if (!entry)
+    return NULL;
+  entry->device = entry->mount_point = entry->fs_type = entry->options = NULL;
+  entry->dump = entry->pass = 0;
+
+  size_t index = 0;
+  char *token = strtok(line, " ");
+  while (token != NULL && index < 6) {
+    if (index == 0)
+      entry->device = strdup(token);
+    else if (index == 1)
+      entry->mount_point = strdup(token);
+    else if (index == 2)
+      entry->fs_type = strdup(token);
+    else if (index == 3)
+      entry->options = strdup(token);
+    else if (index == 4)
+      entry->dump = atoi(token);
+    else if (index == 5)
+      entry->pass = atoi(token);
+    token = strtok(NULL, " ");
+    index++;
+  }
+  return entry;
+}
+
+struct vfs_info *parse_statvfs(const char *path) {
+  struct statvfs vfs;
+  if (statvfs(path, &vfs))
+    return NULL;
+
+  int64_t total = (int64_t)((int64_t)vfs.f_frsize * (int64_t)vfs.f_blocks);
+  int64_t avail = (int64_t)((int64_t)vfs.f_frsize * (int64_t)vfs.f_bavail);
   int64_t used = total - avail;
 
   if (total <= 0) {
     fprintf(stderr, "Invalid total size reported.\n");
-    return;
+    return NULL;
   }
 
-  int64_t stats[] = {total, avail, used};
-  int used_pcrt = (int)(((double)used / (double)total) * 100.0);
-
-  size_t bufsize = 512;
-  char buffer[512];
-  for (size_t i = 0; i < 3; i++) {
-    if (human_size(buffer, bufsize, stats[i])) {
-      fprintf(stderr, "Failed to convert %ld into human-readable format\n", stats[i]);
-      exit(EXIT_FAILURE);
-    }
-    printf("%s %s |", (i == 0) ? "|" : "", buffer);
-  }
-  printf(" %3d%% ", used_pcrt);
-  print_progress_bar(used_pcrt);
-  printf(" |\n");
+  struct vfs_info *ptr = vfs_info_new(total, avail, used);
+  if (!ptr)
+    return NULL;
+  return ptr;
 }
 
-void print_entry(const struct m_entry *mp, const struct statvfs *fs) {
-  printf("Displaying entry");
+/** OUTPUT */
+
+void print_entry(const struct m_entry *mp, const struct vfs_info *fs) {
+  printf("| %s ", mp->device);
+  printf("| %s ", mp->fs_type);
+  printf("| %s ", fs->total);
+  printf("| %d%% ", fs->used_pcrt);
+  print_progress_bar(fs->used_pcrt);
+  printf(" ");
+  printf("| %s ", fs->avail);
 }
 
 int display_entry_info(const char *input) {
@@ -145,19 +193,11 @@ int display_entry_info(const char *input) {
     return -1;
   }
 
-  struct statvfs *fs = (struct statvfs *)malloc(sizeof(struct statvfs));
+  struct vfs_info *fs = parse_statvfs(mp->mount_point);
   if (!fs) {
     free(cp);
     free_entry(mp);
-    perror("Memory error");
-    return -1;
-  }
-
-  if (statvfs(mp->device, fs)) {
-    free(fs);
-    free(cp);
-    free_entry(mp);
-    fprintf(stderr, "statvfs failed\n");
+    fprintf(stderr, "Cannot parse statvfs\n");
     return -1;
   }
 
@@ -165,11 +205,13 @@ int display_entry_info(const char *input) {
 
   free(cp);
   free_entry(mp);
-  free(fs);
+  free_vfs_info(fs);
 
   printf("\n");
   return 0;
 }
+
+/** INIT */
 
 int main(int argc, char *argv[]) {
   FILE *fp = fopen(fname, "r");
