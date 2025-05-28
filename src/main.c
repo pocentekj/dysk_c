@@ -27,6 +27,13 @@ struct vfs_info {
   int used_pcrt;
 };
 
+typedef enum {
+  PARSE_OK = 0,
+  PARSE_ERR_ALLOC,
+  PARSE_ERR_FORMAT,
+  PARSE_ERR_STATVFS
+} ParseResult;
+
 /** HELPERS */
 
 bool startswith(const char *s, const char *search) {
@@ -171,34 +178,36 @@ struct vfs_info *parse_statvfs(const char *path) {
 
 void print_entry(const struct m_entry *mp, const struct vfs_info *fs) {
   printf("| %s ", mp->device);
-  printf("| %s ", mp->fs_type);
-  printf("| %s ", fs->total);
+  printf("| %s | ", mp->fs_type);
+  set_fg_color(YELLOW);
+  printf("%s", fs->total);
+  reset_colors();
   printf("| %d%% ", fs->used_pcrt);
   print_progress_bar(fs->used_pcrt);
-  printf(" ");
-  printf("| %s ", fs->avail);
+  printf(" | ");
+  set_fg_color(GREEN);
+  printf("%s", fs->avail);
+  reset_colors();
+  printf(" |");
 }
 
-int display_entry_info(const char *input) {
+ParseResult display_entry_info(const char *input) {
   char *cp = strdup(input);
   if (!cp) {
-    perror("Cannot copy string");
-    return -1;
+    return PARSE_ERR_ALLOC;
   }
 
   struct m_entry *mp = parse_line(cp);
   if (!mp) {
     free(cp);
-    fprintf(stderr, "Cannot parse input line\n");
-    return -1;
+    return PARSE_ERR_FORMAT;
   }
 
   struct vfs_info *fs = parse_statvfs(mp->mount_point);
   if (!fs) {
     free(cp);
     free_entry(mp);
-    fprintf(stderr, "Cannot parse statvfs\n");
-    return -1;
+    return PARSE_ERR_STATVFS;
   }
 
   print_entry(mp, fs);
@@ -208,7 +217,7 @@ int display_entry_info(const char *input) {
   free_vfs_info(fs);
 
   printf("\n");
-  return 0;
+  return PARSE_OK;
 }
 
 /** INIT */
@@ -226,7 +235,8 @@ int main(int argc, char *argv[]) {
   while (fgets(buf, BUFSIZ, fp)) {
     if (!startswith(buf, "/dev/"))
       continue;
-    display_entry_info(buf);
+    if (display_entry_info(buf))
+      fprintf(stderr, "parser failure\n");  // TODO: make it more verbose.
   }
   printf("|--------|-------------|-------|------|-----------|\n");
 
