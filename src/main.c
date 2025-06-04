@@ -73,14 +73,13 @@ void print_progress_bar(const unsigned percentage) {
 
 void print_border() {
   size_t cols[] = {32, 13, 12, 17, 13};
+  putchar('|');
   for (size_t i = 0; i < sizeof(cols) / sizeof(size_t); i++) {
-    if (i == 0)
-      putchar('|');
     for (; cols[i] > 0; cols[i]--)
       putchar('-');
     putchar('|');
   }
-  printf("\n");
+  putchar('\n');
 }
 
 /** UTILS */
@@ -260,3 +259,4 @@ int main(int argc, char *argv[]) {
   fclose(fp);
   return EXIT_SUCCESS;
 }
+

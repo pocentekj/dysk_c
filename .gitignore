@@ -1,2 +1,6 @@
 /bin/
 /build/
+
+# IDE and editor settings
+Session.vim
+
