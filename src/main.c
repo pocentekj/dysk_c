@@ -8,6 +8,18 @@
 #include <string.h>
 #include <sys/statvfs.h>
 
+#define HORIZ  "─"
+#define VERT   "│"
+#define TL     "┌"
+#define TR     "┐"
+#define BL     "└"
+#define BR     "┘"
+#define TOPJ   "┬"
+#define MIDJ   "┼"
+#define SIDEJ  "├"
+#define SIDEJR "┤"
+#define BOTJ   "┴"
+
 /** DATA */
 
 static const char *fname = "/proc/mounts";
@@ -71,15 +83,15 @@ void print_progress_bar(const unsigned percentage) {
   reset_colors();
 }
 
-void print_border() {
-  size_t cols[] = {32, 13, 12, 17, 13};
-  putchar('|');
-  for (size_t i = 0; i < sizeof(cols) / sizeof(size_t); i++) {
-    for (; cols[i] > 0; cols[i]--)
-      putchar('-');
-    putchar('|');
+void print_border(const char *left, const char *mid, const char *right, const char *fill) {
+  size_t cols[] = {32, 10, 12, 17, 13};
+  printf("%s", left);
+  for (size_t i = 0; i < sizeof(cols)/sizeof(cols[0]); i++) {
+    for (size_t j = 0; j < cols[i]; j++) printf("%s", fill);
+    if (i < sizeof(cols)/sizeof(cols[0]) - 1)
+      printf("%s", mid);
   }
-  putchar('\n');
+  printf("%s\n", right);
 }
 
 /** UTILS */
@@ -188,18 +200,18 @@ struct vfs_info *parse_statvfs(const char *path) {
 
 void print_entry(const struct m_entry *mp, const struct vfs_info *fs) {
   char *abbr_device = truncate(mp->device, 30);
-  printf("| %-30s ", abbr_device);
-  printf("| %-11s | ", mp->fs_type);
+  printf(VERT " %-30s ", abbr_device);
+  printf(VERT " %-8s " VERT, mp->fs_type);
   set_fg_color(YELLOW);
-  printf("%-11s", fs->total);
+  printf(" %-11s", fs->total);
   reset_colors();
-  printf("| %3d%% ", fs->used_pcrt);
+  printf(VERT " %3d%% ", fs->used_pcrt);
   print_progress_bar(fs->used_pcrt);
-  printf(" | ");
+  printf(" " VERT " ");
   set_fg_color(GREEN);
   printf("%-11s", fs->avail);
   reset_colors();
-  printf(" |");
+  printf(" " VERT);
   free(abbr_device);
 }
 
@@ -242,9 +254,10 @@ int main(int argc, char *argv[]) {
   }
 
   // Table header
-  print_border();
-  printf("| %-30s | File system | %-10s | %-15s | %-11s |\n", "Device", "Total", "Used", "Available");
-  print_border();
+  print_border(TL, TOPJ, TR, HORIZ);
+  printf(VERT " %-30s " VERT " %-8s " VERT " %-10s " VERT " %-15s " VERT " %-11s " VERT "\n",
+         "Device", "Type", "Total", "Used", "Available");
+  print_border(SIDEJ, MIDJ, SIDEJR, HORIZ);
   // Table body
   char buf[BUFSIZ];
   while (fgets(buf, BUFSIZ, fp)) {
@@ -254,7 +267,7 @@ int main(int argc, char *argv[]) {
       fprintf(stderr, "parser failure\n"); // TODO: make it more verbose.
   }
   // Table footer
-  print_border();
+  print_border(BL, BOTJ, BR, HORIZ);
 
   fclose(fp);
   return EXIT_SUCCESS;
